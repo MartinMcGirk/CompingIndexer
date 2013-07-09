@@ -15,17 +15,31 @@ namespace CompingIndexer
 {
     public partial class IndexingRepoter : Form
     {
+        private const String PAGE_ADDRESS = @"http://forums.moneysavingexpert.com/forumdisplay.php?f=72&order=desc&page={0}";
+        
         public IndexingRepoter()
         {
             InitializeComponent();
-            HarvestCompetitionLinks(@"http://forums.moneysavingexpert.com/forumdisplay.php?s=e47e6ec28f39dc7ec25a369e335606d8&f=72");       
+            
         }
 
-        private void HarvestCompetitionLinks(String path)
+        private void HarvestCompetitionLinks(String path, int numPages)
         {
-            String source = GetPageSource(path);
-            List<LinkItem> threadsOnPage = HarvestThreadLinks(source);
-            AvailableCompetitions.DataSource = threadsOnPage;
+            HashSet<LinkItem> threadsOnAllPages = new HashSet<LinkItem>();
+            for (int i = 1; i < numPages + 1; i++)
+            {
+                String pagePath = String.Format(path, i);
+                String source = GetPageSource(pagePath);
+                List<LinkItem> threadsOnPage = HarvestThreadLinks(source);
+                foreach (var li in threadsOnPage)
+                {
+                    if (!threadsOnAllPages.Contains(li))
+                    {
+                        threadsOnAllPages.Add(li);
+                    }
+                }
+            }
+            AvailableCompetitions.DataSource = threadsOnAllPages.ToList();
             AvailableCompetitions.ValueMember = "Url";
             AvailableCompetitions.DisplayMember = "Title";
         }
@@ -48,7 +62,13 @@ namespace CompingIndexer
                 LinkItem li = new LinkItem(newThread, match.Groups[2].Value);
                 if (!linksFound.Contains(li) && li.Title.StartsWith("E:"))
                 {
-                    linksFound.Add(li);
+                    bool okToAdd = true;
+                    okToAdd = (excludeFacebook.Checked && (li.Title.Contains("Facebook") || li.Title.Contains("FB"))) ? false : okToAdd;
+                    okToAdd = (excludeTwitter.Checked && (li.Title.Contains("Twitter") || li.Title.Contains("(TW)"))) ? false : okToAdd;
+                    if (okToAdd)
+                    {
+                        linksFound.Add(li);
+                    } 
                 }
             }
 
@@ -58,10 +78,15 @@ namespace CompingIndexer
         private LinkItem HarvestCompetitionLink(String link, String title)
         {
             String source = GetPageSource(link);
-            String trimmedSource = source.Substring(source.IndexOf(@"<!-- message -->"));
-            Regex regex = new Regex("href=\"(http://[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Multiline);
-            var matches = regex.Matches(trimmedSource);
-            return new LinkItem(matches[0].Groups[1].Value, title);
+            int trimIndex = source.IndexOf(@"<!-- message -->");
+            if (trimIndex > -1)
+            {
+                String trimmedSource = source.Substring(trimIndex);
+                Regex regex = new Regex("href=\"(http[s]{0,1}://[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+                var matches = regex.Matches(trimmedSource);
+                return new LinkItem(matches[0].Groups[1].Value, title);
+            }
+            return new LinkItem(link, title);
         }
 
         /// <summary>
@@ -73,7 +98,6 @@ namespace CompingIndexer
         {
             WebClient client = new WebClient();
             return client.DownloadString(url);
-            //return File.ReadAllText(@"C:\TestCompPage.txt");
         }
 
         private void AvailableCompetitions_SelectedIndexChanged(object sender, EventArgs e)
@@ -82,6 +106,12 @@ namespace CompingIndexer
             webBrowser.Navigate(chosenLink.Url);
             LinkItem actualLink = HarvestCompetitionLink(chosenLink.Url, chosenLink.Title);
             webBrowserActual.Navigate(actualLink.Url);
+            textBoxLink.Text = actualLink.Url;
+        }
+
+        private void GoButton_Click(object sender, EventArgs e)
+        {
+            HarvestCompetitionLinks(PAGE_ADDRESS, Convert.ToInt32(numPagesSelector.Value));
         }
 
        
